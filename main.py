@@ -280,7 +280,7 @@ x = LeakyReLU(alpha=0.1)(x)
 ### Layer 7
 x = Conv2D(128, (1,1), strides=(1,1), padding='same',
            name='conv_7', use_bias=False)(x)
-x = BatchNormalization(name='norm_7')
+x = BatchNormalization(name='norm_7')(x)
 x = LeakyReLU(alpha=0.1)(x)
 
 ### Layer 8
@@ -429,6 +429,81 @@ for i in range(1, nb_conv + 1):
         kernel = kernel.transpose([2,3,1,0])
         conv_layer.set_weights([kernel])
 
+"""Randomize weights of the last year"""
+layer   = model.layers[-4] # the last conv layer
+weights = layer.get_weights()
+
+new_kernel  = np.random.normal(size=weights[0].shape) / (GRID_W*GRID_H)
+new_bias    = np.random.normal(size=weights[1].shape) / (GRID_H*GRID_W)
+
+layer.set_weights([new_kernel, new_bias])
+
+"""Parse the annotations to construct train generator and validation generator"""
+generator_config = {
+    'IMAGE_H'           : IMAGE_H,
+    'IMAGE_W'           : IMAGE_W,
+    'GRID_H'            : GRID_H,
+    'GRID_D'            : GRID_W,
+    'BOX'               : BOX,
+    'LABELS'            : LABELS,
+    'CLASS'             : len(LABELS),
+    'ANCHORS'           : ANCHORS,
+    'BATCH_SIZE'        : BATCH_SIZE,
+    'TRUE_BOX_BUFFER'   : 50,
+}
+
+train_imgs, seen_train_labels = parse_annotation(
+    train_annot_folder,
+    train_image_folder,
+    labels=LABELS)
+
+train_batch = BatchNormalization(train_imgs, generator_config, norm=normalize)
+
+valid_imgs, seen_valid_labels = parse_annotation(
+    valid_annot_folder,
+    valid_image_folder,
+    labels=LABELS)
+
+valid_batch = BatchNormalization(valid_imgs, generator_config, norm=normalize, jitter=False)
+
+"""Setup a few callbacks and start the training"""
+early_stop = EarlyStopping(
+    monitor='val_loss',
+    min_delta=0.001,
+    patience=3,
+    mode='min',
+    verbose=1)
+
+checkpoint = ModelCheckpoint(
+    filepath='weights_coco.h5',
+    monitor='val_loss',
+    verbose=1,
+    save_best_only=True,
+    mode='min',
+    period=1)
+
+tb_counter  = len([log for log in os.listdir(os.path.expanduser('~/logs/')) if 'coco_' in log]) + 1
+
+tensorboard = TensorBoard(
+    log_dir=os.path.expanduser('~/logs/') + 'coco_' + '_' + str(tb_counter),
+    histogram_freq=0,
+    write_graph=True,
+    write_images=False
+)
+
+optimizer = Adam(lr=0.5e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+
+model.compile(loss=custom_loss, optimizer=optimizer)
+
+model.fit_generator(
+    generator        = train_batch,
+    steps_per_epoch  = len(train_batch),
+    epochs           = 100,
+    verbose          = 1,
+    validation_data  = valid_batch,
+    validation_steps = len(valid_batch),
+    callbacks        = [early_stop, checkpoint, tensorboard],
+    max_queue_size   = 3)
 
 
 

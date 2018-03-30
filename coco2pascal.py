@@ -1,6 +1,6 @@
 import baker
 import json
-from path import path
+from path import Path
 from cytoolz import merge, join, groupby
 from cytoolz.compatibility import iteritems
 from cytoolz.curried import update_in
@@ -50,19 +50,19 @@ def instance_to_xml(anno):
 
 @baker.command
 def write_categories(coco_annotation, dst):
-    content = json.loads(path(coco_annotation).expand().text())
+    content = json.loads(Path(coco_annotation).expand().text())
     categories = tuple( d['name'] for d in content['categories'])
-    savemat(path(dst).expand(), {'categories': categories})
+    savemat(Path(dst).expand(), {'categories': categories})
 
 
 def get_instances(coco_annotation):
-    coco_annotation = path(coco_annotation).expand()
+    coco_annotation = Path(coco_annotation).expand()
     content = json.loads(coco_annotation.text())
     categories = {d['id']: d['name'] for d in content['categories']}
     return categories, tuple(keyjoin('id', content['images'], 'image_id', content['annotations']))
 
 def rename(name, year=2014):
-        out_name = path(name).stripext()
+        out_name = Path(name).stripext()
         # out_name = out_name.split('_')[-1]
         # out_name = '{}_{}'.format(year, out_name)
         return out_name
@@ -70,8 +70,8 @@ def rename(name, year=2014):
 
 @baker.command
 def create_imageset(annotations, dst):
-    annotations = path(annotations).expand()
-    dst = path(dst).expand()
+    annotations = Path(annotations).expand()
+    dst = Path(dst).expand()
     val_txt = dst / 'val.txt'
     train_txt = dst / 'train.txt'
 
@@ -83,10 +83,10 @@ def create_imageset(annotations, dst):
 
 @baker.command
 def create_annotations(dbpath, subset, dst):
-    annotations_path = path(dbpath).expand() / 'annotations/instances_{}2014.json'.format(subset)
-    images_path = path(dbpath).expand() / 'images/{}2014'.format(subset)
+    annotations_path = Path(dbpath).expand() / 'annotations/instances_{}2014.json'.format(subset)
+    images_path = Path(dbpath).expand() / '{}2014'.format(subset)
     categories , instances= get_instances(annotations_path)
-    dst = path(dst).expand()
+    dst = Path(dst).expand()
 
     for i, instance in enumerate(instances):
         instances[i]['category_id'] = categories[instance['category_id']]
@@ -100,9 +100,9 @@ def create_annotations(dbpath, subset, dst):
             for instance in group:
                 annotation.append(instance_to_xml(instance))
             etree.ElementTree(annotation).write(dst / '{}.xml'.format(out_name))
-            print out_name
+            print (out_name)
         else:
-            print instance['file_name']
+            print (instance['file_name'])
 
 
 
