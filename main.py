@@ -15,6 +15,20 @@ import os, cv2
 from preprocessing import parse_annotation, BatchGenerator
 from utils import WeightReader, decode_netout, draw_boxes, normalize
 
+def get_session(gpu_fraction=0.8):
+    '''Assume that you have 6GB of GPU memory and want to allocate ~2GB'''
+
+    num_threads = os.environ.get('OMP_NUM_THREADS')
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_fraction)
+
+    if num_threads:
+        return tf.Session(config=tf.ConfigProto(
+            gpu_options=gpu_options, intra_op_parallelism_threads=num_threads))
+    else:
+        return tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+
+K.set_session(get_session())
+
 # Set up
 LABELS = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush']
 
@@ -39,11 +53,11 @@ BATCH_SIZE       = 16       # ?
 WARM_UP_BATCHES  = 0        # ?
 TRUE_BOX_BUFFER  = 50       # ?
 
-pre_train_weight_path = 'yolo.weights'
-train_image_folder    = '/home/vtc/git/data/train2014/'
-train_annot_folder    = '/home/vtc/git/data/train2014ann/'
-valid_image_folder    = '/home/vtc/git/data/valid2014/'
-valid_annot_folder    = '/home/vtc/git/data/valid2014ann/'
+pre_train_weight_path = 'data/yolo.weights'
+train_image_folder = '/home/vtc/git/data/train2014/'
+train_annot_folder = '/home/vtc/git/recode_obj_detection/data/train2014pascal2/'
+valid_image_folder = '/home/vtc/git/data/val2014/'
+valid_annot_folder = '/home/vtc/git/recode_obj_detection/data/val2014pascal2/'
 
 def space_to_depth_x2(x):
     """
@@ -118,7 +132,7 @@ def custom_loss(y_true, y_pred):
 
     intersect_mins  = tf.maximum(pred_mins, true_mins)
     intersect_maxes = tf.minimum(pred_maxes, true_maxes)
-    intersect_wh    = tf.maximun(intersect_maxes - intersect_mins, 0.)
+    intersect_wh    = tf.maximum(intersect_maxes - intersect_mins, 0.)
     intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1] ### ?
 
     # Compute iou_scores
@@ -372,6 +386,7 @@ skip_connection = BatchNormalization(name='norm_21')(skip_connection)
 skip_connection = LeakyReLU(alpha=0.1)(skip_connection)
 skip_connection = Lambda(space_to_depth_x2)(skip_connection)     # ?
 
+x = concatenate([skip_connection, x])
 ### Layer 22
 x = Conv2D(1024, (3,3), strides=(1,1), padding='same',
            name='conv_22', use_bias=False)(x)
@@ -420,7 +435,7 @@ for i in range(1, nb_conv + 1):
             np.prod(conv_layer.get_weights()[0].shape))
         kernel  = kernel.reshape(list(reversed(conv_layer.get_weights()[0].shape)))
         kernel  = kernel.transpose([2,3,1,0])
-        conv_layer.set_weights([kernel])
+        conv_layer.set_weights([kernel, bias])
     else:
         kernel = weight_reader.read_bytes(
             np.prod(conv_layer.get_weights()[0].shape))
@@ -443,7 +458,7 @@ generator_config = {
     'IMAGE_H'           : IMAGE_H,
     'IMAGE_W'           : IMAGE_W,
     'GRID_H'            : GRID_H,
-    'GRID_D'            : GRID_W,
+    'GRID_W'            : GRID_W,
     'BOX'               : BOX,
     'LABELS'            : LABELS,
     'CLASS'             : len(LABELS),
@@ -457,14 +472,14 @@ train_imgs, seen_train_labels = parse_annotation(
     train_image_folder,
     labels=LABELS)
 
-train_batch = BatchNormalization(train_imgs, generator_config, norm=normalize)
+train_batch = BatchGenerator(train_imgs, generator_config, norm=normalize)
 
 valid_imgs, seen_valid_labels = parse_annotation(
     valid_annot_folder,
     valid_image_folder,
     labels=LABELS)
 
-valid_batch = BatchNormalization(valid_imgs, generator_config, norm=normalize, jitter=False)
+valid_batch = BatchGenerator(valid_imgs, generator_config, norm=normalize, jitter=False)
 
 """Setup a few callbacks and start the training"""
 early_stop = EarlyStopping(
@@ -498,7 +513,7 @@ model.compile(loss=custom_loss, optimizer=optimizer)
 model.fit_generator(
     generator        = train_batch,
     steps_per_epoch  = len(train_batch),
-    epochs           = 100,
+    epochs           = 1,
     verbose          = 1,
     validation_data  = valid_batch,
     validation_steps = len(valid_batch),
